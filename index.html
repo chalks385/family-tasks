@@ -199,6 +199,8 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const DAY = 86400000;
 const now = () => Date.now();
+const iso = (ms = Date.now()) => new Date(ms).toISOString();   // timestamptz 欄位用 ISO 字串
+const ts = (v) => v ? new Date(v).getTime() : 0;               // ISO/數字皆可轉回毫秒排序
 
 /* ---------- 儲存後端（本機 / 雲端，同一組介面） ---------- */
 function makeLocalStore() {
@@ -207,7 +209,7 @@ function makeLocalStore() {
   const write = (a) => localStorage.setItem(KEY, JSON.stringify(a));
   return {
     kind: "local",
-    async list() { return read().sort((a,b)=> (a.created_at||0)-(b.created_at||0)); },
+    async list() { return read().sort((a,b)=> ts(a.created_at)-ts(b.created_at)); },
     async add(t) { const a = read(); a.push(t); write(a); },
     async update(id, fields) { const a = read().map(t => t.id===id ? {...t, ...fields} : t); write(a); },
     async remove(id) { write(read().filter(t => t.id!==id)); },
@@ -260,11 +262,11 @@ async function complete(t) {
   if (t.is_recurring) {
     const n = now();
     await store.update(t.id, {
-      status: "done", last_done_at: n, last_done_by: user,
-      next_due_at: n + t.period_days * DAY,
+      status: "done", last_done_at: iso(n), last_done_by: user,
+      next_due_at: iso(n + t.period_days * DAY),
     });
   } else {
-    await store.update(t.id, { status: "done", last_done_at: now(), last_done_by: user });
+    await store.update(t.id, { status: "done", last_done_at: iso(), last_done_by: user });
   }
   render();
 }
@@ -366,7 +368,7 @@ async function render() {
     det.className = "done-group";
     det.innerHTML = `<summary>${sectionTitleHTML("🔁 週期任務（已完成，等下次）", scheduled.length)}</summary>`;
     const ul = document.createElement("ul");
-    scheduled.sort((a,b)=>(a.next_due_at||0)-(b.next_due_at||0));
+    scheduled.sort((a,b)=>ts(a.next_due_at)-ts(b.next_due_at));
     scheduled.forEach(t => ul.appendChild(taskItem(t, { struck: true })));
     det.appendChild(ul);
     listEl.appendChild(det);
@@ -376,7 +378,7 @@ async function render() {
     det.className = "done-group";
     det.innerHTML = `<summary>${sectionTitleHTML("✓ 已完成", doneOnce.length)}</summary>`;
     const ul = document.createElement("ul");
-    doneOnce.sort((a,b)=>(b.last_done_at||0)-(a.last_done_at||0));
+    doneOnce.sort((a,b)=>ts(b.last_done_at)-ts(a.last_done_at));
     doneOnce.forEach(t => ul.appendChild(taskItem(t, { struck: true })));
     det.appendChild(ul);
     listEl.appendChild(det);
@@ -429,7 +431,7 @@ $("#saveBtn").onclick = async () => {
     period_days: form.recurring === 1 ? form.period : null,
     status: "pending",
     last_done_at: null, last_done_by: null, next_due_at: null,
-    created_at: now(),
+    created_at: iso(),
   };
   try { await store.add(t); } catch (e) { alert("新增失敗：" + e.message); return; }
   closeSheet();
