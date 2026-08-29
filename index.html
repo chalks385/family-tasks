@@ -128,10 +128,44 @@
   .period-wrap { margin-top: 6px; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; padding: 0 2px; }
   .hidden { display: none !important; }
+
+  /* 登入畫面 */
+  .login { min-height: 90vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .login-card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 20px;
+    box-shadow: var(--shadow); padding: 32px 24px; max-width: 400px; width: 100%; text-align: center;
+  }
+  .login-emoji { font-size: 44px; }
+  .login-card h1 { font-size: 24px; margin: 8px 0 6px; }
+  .login-sub { color: var(--muted); font-size: 14px; margin: 0 0 22px; line-height: 1.6; }
+  .login-card input { text-align: center; margin-bottom: 14px; }
+  .login-card .btn { width: 100%; }
+  .login-msg { font-size: 13px; margin-top: 14px; min-height: 18px; }
+  .login-msg.ok { color: var(--accent); }
+  .login-msg.err { color: var(--urgent); }
+
+  /* 已登入資訊列 */
+  .authrow { text-align: center; font-size: 12px; color: var(--muted); margin: -6px 0 14px; }
+  .authrow button {
+    border: none; background: transparent; color: var(--muted);
+    text-decoration: underline; cursor: pointer; font-size: 12px; padding: 2px 4px;
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
+<!-- 登入畫面（雲端模式且尚未登入時顯示） -->
+<div id="loginView" class="login hidden">
+  <div class="login-card">
+    <div class="login-emoji">🏠</div>
+    <h1>家庭待辦</h1>
+    <p class="login-sub">輸入你的 email，我們寄一條登入連結給你。<br>點連結就登入，不用記密碼。</p>
+    <input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="email" inputmode="email" />
+    <button class="btn primary" id="loginBtn">寄送登入連結</button>
+    <div class="login-msg" id="loginMsg"></div>
+  </div>
+</div>
+
+<div class="wrap hidden" id="appView">
   <header>
     <h1>🏠 家庭待辦</h1>
     <div class="who">
@@ -139,11 +173,12 @@
     </div>
   </header>
   <div class="backend" id="backend"></div>
+  <div class="authrow" id="authRow"></div>
 
   <div id="list"></div>
 </div>
 
-<button class="fab" id="fab" aria-label="新增待辦">＋</button>
+<button class="fab hidden" id="fab" aria-label="新增待辦">＋</button>
 
 <div class="sheet-backdrop" id="backdrop">
   <div class="sheet" id="sheet">
@@ -215,8 +250,7 @@ function makeLocalStore() {
     async remove(id) { write(read().filter(t => t.id!==id)); },
   };
 }
-function makeSupabaseStore() {
-  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+function makeSupabaseStore(sb) {
   const T = "tasks";
   return {
     kind: "cloud",
@@ -230,7 +264,8 @@ function makeSupabaseStore() {
   };
 }
 const useCloud = SUPABASE_URL && SUPABASE_ANON_KEY;
-const store = useCloud ? makeSupabaseStore() : makeLocalStore();
+const sbClient = useCloud ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const store = useCloud ? makeSupabaseStore(sbClient) : makeLocalStore();
 
 /* ---------- 「我是誰」 ---------- */
 function getUser() { return localStorage.getItem("ft_user") || ""; }
@@ -443,11 +478,55 @@ $("#whoBtn").onclick = () => {
   if (v !== null) { setUser(v.trim()); render(); }
 };
 
-/* 每分鐘重新判斷一次到期，讓週期任務自動浮回待處理 */
-setInterval(render, 60000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
+/* ---------- 登入（magic link） ---------- */
+function showLogin(show) {
+  $("#loginView").classList.toggle("hidden", !show);
+  $("#appView").classList.toggle("hidden", show);
+  $("#fab").classList.toggle("hidden", show);
+}
+function renderAuthRow(session) {
+  const row = $("#authRow");
+  if (session && session.user) {
+    row.innerHTML = `已登入：${session.user.email} ・ <button id="logoutBtn">登出</button>`;
+    $("#logoutBtn").onclick = async () => { await sbClient.auth.signOut(); };
+  } else { row.innerHTML = ""; }
+}
+async function onAuthChange(session) {
+  if (!session) { renderAuthRow(null); showLogin(true); return; }
+  renderAuthRow(session);
+  showLogin(false);
+  if (!getUser()) setUser((session.user.email || "").split("@")[0]);
+  render();
+}
+$("#loginBtn").onclick = async () => {
+  const email = $("#loginEmail").value.trim();
+  const msg = $("#loginMsg");
+  if (!email) { msg.className = "login-msg err"; msg.textContent = "請先輸入 email"; return; }
+  $("#loginBtn").disabled = true;
+  msg.className = "login-msg"; msg.textContent = "寄送中…";
+  const { error } = await sbClient.auth.signInWithOtp({
+    email, options: { emailRedirectTo: location.href.split("#")[0].split("?")[0] },
+  });
+  $("#loginBtn").disabled = false;
+  if (error) { msg.className = "login-msg err"; msg.textContent = "寄送失敗：" + error.message; }
+  else { msg.className = "login-msg ok"; msg.textContent = "📩 已寄出！到信箱點連結就會登入（同一支手機開）。"; }
+};
+$("#loginEmail").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#loginBtn").click(); });
 
-render();
+/* 每分鐘重新判斷一次到期，讓週期任務自動浮回待處理 */
+setInterval(() => { if (!$("#appView").classList.contains("hidden")) render(); }, 60000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && !$("#appView").classList.contains("hidden")) render();
+});
+
+/* ---------- 啟動 ---------- */
+async function init() {
+  if (!useCloud) { showLogin(false); render(); return; }  // 本機模式不需登入
+  const { data: { session } } = await sbClient.auth.getSession();
+  onAuthChange(session);
+  sbClient.auth.onAuthStateChange((_event, s) => onAuthChange(s));
+}
+init();
 </script>
 </body>
 </html>

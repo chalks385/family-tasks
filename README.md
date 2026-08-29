@@ -26,11 +26,17 @@
 
 ### 1. 建立 Supabase 專案（免費）
 1. 到 <https://supabase.com> 用 Google 或 email 註冊、新增一個 Project（免費方案即可）
-2. 專案建好後，左側 **SQL Editor → New query**，把本專案的
-   [`supabase.sql`](supabase.sql) 全部貼上，按 **Run** 建好資料表
+2. 打開 [`supabase.sql`](supabase.sql)，把裡面兩個 `email` 換成**你和老婆真正用來登入的 email**，
+   然後到左側 **SQL Editor → New query** 全部貼上、按 **Run**（建好資料表 + 安全政策）
 3. 左側 **Project Settings → API**，複製兩個值：
    - **Project URL**（像 `https://xxxx.supabase.co`）
    - **anon public** 金鑰（很長一串）
+
+### 1.5 設定登入網址（magic link 才會生效）
+左側 **Authentication → URL Configuration**：
+- **Site URL** 填你的網站網址（例如 `https://你的帳號.github.io/family-tasks/`）
+- **Redirect URLs** 也把同一個網址加進去
+（沒設這步，點 email 裡的登入連結會失效。）
 
 ### 2. 填進網頁
 打開 `index.html`，找到最上方這兩行，貼上剛剛複製的值：
@@ -56,7 +62,9 @@ const SUPABASE_ANON_KEY = "";   // 貼上 anon public 金鑰
 - 右上角「我是」設定你的名字，完成事情會記錄是誰做的
 - 週期任務到期會自動回到待處理（打開或切回網頁時即時更新）
 
-## 關於安全
-這是「家用、憑網址存取」的簡化設定：知道網址的人就能讀寫，沒有帳號密碼。
-對兩人家庭夠用。若日後想更嚴謹（加登入、限制存取），再調整 Supabase 的
-RLS 政策即可。
+## 關於安全（已上鎖）
+- 需要**登入**才能使用：用 email 收 magic link，點連結登入，不用記密碼。
+- 資料庫 RLS 只允許 `supabase.sql` 名單內的 email 讀寫。**就算有人拿到金鑰或網址，
+  沒登入、或不在名單內，也完全存取不到資料。** 所以放在 public repo 也沒關係。
+- 想新增／移除可用的人：改 `supabase.sql` 裡的 email 名單、重跑一次即可。
+- 第一次在新手機用：打開網址 → 輸入 email → 收信點連結（在同一支手機開）→ 登入完成，之後會記住。

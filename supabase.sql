@@ -16,17 +16,22 @@ create table if not exists public.tasks (
   created_at   timestamptz not null default now()
 );
 
--- 讓前端（anon 金鑰）可以讀寫。
--- 這是「家用、憑網址存取」的簡化設定：知道網址的人就能用，沒有帳號登入。
+-- 安全設定：只有「登入且 email 在名單內」的人才能讀寫。
+-- 拿到 anon 金鑰或網址但沒登入 → 完全存取不到資料。
+--
+-- ⬇⬇⬇ 把下面兩個 email 換成你和老婆真正的 email（用來登入的那個）⬇⬇⬇
 alter table public.tasks enable row level security;
 
+-- 先移除舊的（不論之前是全開版還是更早的名稱）
 drop policy if exists "family full access" on public.tasks;
-create policy "family full access"
+drop policy if exists "family members only" on public.tasks;
+
+create policy "family members only"
   on public.tasks
   for all
-  to anon, authenticated
-  using (true)
-  with check (true);
+  to authenticated
+  using      ( (auth.jwt() ->> 'email') in ('chalks385@gmail.com', '換成老婆的email@example.com') )
+  with check ( (auth.jwt() ->> 'email') in ('chalks385@gmail.com', '換成老婆的email@example.com') );
 
 -- 開啟即時同步（一支手機改動，另一支自動看到）
 -- Supabase 通常預設已開；若沒有，執行下一行：
