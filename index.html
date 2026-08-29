@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#f7f5f2" />
+<title>家庭待辦 FamilyTasks</title>
+<style>
+  :root {
+    --bg: #f7f5f2;
+    --card: #ffffff;
+    --text: #1f2430;
+    --muted: #6b7280;
+    --line: #eceae5;
+    --urgent: #e5484d;
+    --urgent-bg: #fdecec;
+    --accent: #2f6f4f;
+    --accent-bg: #e7f2ec;
+    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --card: #1e2127;
+      --text: #e8eaed;
+      --muted: #9aa0aa;
+      --line: #2a2e36;
+      --urgent: #ff6369;
+      --urgent-bg: #3a1e1f;
+      --accent: #6bbf94;
+      --accent-bg: #1c2a23;
+      --shadow: 0 1px 3px rgba(0,0,0,.3);
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC",
+      "Microsoft JhengHei", Roboto, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+             calc(96px + env(safe-area-inset-bottom)) env(safe-area-inset-left);
+  }
+  .wrap { max-width: 620px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 4px 4px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: .5px; }
+  .who { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .who button {
+    border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer; font-weight: 600;
+  }
+  .backend { text-align: center; font-size: 11px; color: var(--muted); margin: 2px 0 14px; }
+  .backend .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  .cloud { background:#2f9e63; } .local { background:#d9a13b; }
+
+  .section-title { font-size: 13px; font-weight: 700; color: var(--muted); margin: 22px 6px 8px; letter-spacing: .4px; display:flex; align-items:center; gap:7px; }
+  .section-title .count { font-weight: 500; opacity: .8; }
+
+  ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+  .task {
+    display: flex; align-items: flex-start; gap: 12px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 13px 14px; box-shadow: var(--shadow);
+  }
+  .task.urgent { border-color: var(--urgent); background: var(--urgent-bg); }
+  .check {
+    flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%;
+    border: 2px solid var(--muted); background: transparent; cursor: pointer;
+    display: grid; place-items: center; margin-top: 1px; transition: .12s;
+  }
+  .task.urgent .check { border-color: var(--urgent); }
+  .check:active { transform: scale(.9); }
+  .check.done { background: var(--accent); border-color: var(--accent); }
+  .check svg { width: 15px; height: 15px; stroke: #fff; display: none; }
+  .check.done svg { display: block; }
+  .body { flex: 1 1 auto; min-width: 0; }
+  .title { font-size: 16px; font-weight: 600; word-break: break-word; }
+  .title.struck { text-decoration: line-through; color: var(--muted); font-weight: 500; }
+  .meta { font-size: 12px; color: var(--muted); margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+  .tag { display:inline-flex; align-items:center; gap:4px; }
+  .tag.urg { color: var(--urgent); font-weight: 700; }
+  .tag.due-now { color: var(--urgent); font-weight: 700; }
+  .del { flex: 0 0 auto; border: none; background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; padding: 2px 4px; line-height: 1; }
+  .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 40px 12px; }
+
+  details.done-group summary { cursor: pointer; list-style: none; }
+  details.done-group summary::-webkit-details-marker { display: none; }
+
+  /* Add button + sheet */
+  .fab {
+    position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom));
+    width: 60px; height: 60px; border-radius: 50%; border: none;
+    background: var(--accent); color: #fff; font-size: 30px; cursor: pointer;
+    box-shadow: 0 6px 18px rgba(0,0,0,.22); z-index: 20; display: grid; place-items: center;
+  }
+  .sheet-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 30;
+    display: none; align-items: flex-end; justify-content: center;
+  }
+  .sheet-backdrop.open { display: flex; }
+  .sheet {
+    background: var(--card); width: 100%; max-width: 620px;
+    border-radius: 20px 20px 0 0; padding: 20px 20px calc(24px + env(safe-area-inset-bottom));
+    box-shadow: 0 -6px 24px rgba(0,0,0,.2);
+  }
+  .sheet h2 { margin: 2px 0 16px; font-size: 18px; }
+  label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin: 14px 2px 6px; }
+  input[type=text], input[type=number] {
+    width: 100%; font-size: 16px; padding: 12px 14px; border-radius: 12px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    border: 1px solid var(--line); background: var(--bg); color: var(--text);
+    border-radius: 999px; padding: 9px 14px; font-size: 14px; cursor: pointer; font-weight: 600;
+  }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chip.urg.on { background: var(--urgent); border-color: var(--urgent); }
+  .row { display: flex; gap: 10px; margin-top: 22px; }
+  .btn {
+    flex: 1; padding: 14px; border-radius: 12px; border: none; font-size: 16px;
+    font-weight: 700; cursor: pointer;
+  }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.ghost { background: var(--bg); color: var(--text); border: 1px solid var(--line); }
+  .period-wrap { margin-top: 6px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; padding: 0 2px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🏠 家庭待辦</h1>
+    <div class="who">
+      我是 <button id="whoBtn">—</button>
+    </div>
+  </header>
+  <div class="backend" id="backend"></div>
+
+  <div id="list"></div>
+</div>
+
+<button class="fab" id="fab" aria-label="新增待辦">＋</button>
+
+<div class="sheet-backdrop" id="backdrop">
+  <div class="sheet" id="sheet">
+    <h2>新增待辦</h2>
+    <label>要做什麼？</label>
+    <input type="text" id="f_title" placeholder="例如：晾衣服、換濾水器濾芯" autocomplete="off" />
+
+    <label>急不急？</label>
+    <div class="chips" id="f_urgency">
+      <button class="chip urg" data-u="urgent">🔴 Urgent</button>
+      <button class="chip on" data-u="normal">⚪ 一般</button>
+    </div>
+
+    <label>要重複做嗎？</label>
+    <div class="chips" id="f_recurring">
+      <button class="chip on" data-r="0">一次性</button>
+      <button class="chip" data-r="1">週期重複</button>
+    </div>
+
+    <div class="period-wrap hidden" id="periodWrap">
+      <label>每隔多久要再做一次？</label>
+      <div class="chips" id="f_period">
+        <button class="chip" data-p="1">每天</button>
+        <button class="chip" data-p="7">每週</button>
+        <button class="chip" data-p="30">每月</button>
+        <button class="chip on" data-p="90">每 3 個月</button>
+        <button class="chip" data-p="180">每半年</button>
+        <button class="chip" data-p="365">每年</button>
+      </div>
+      <div style="margin-top:10px">
+        <input type="number" id="f_period_custom" min="1" placeholder="或自訂天數" />
+      </div>
+      <div class="hint">做完打勾後，這件事會在到期日自動回到待處理清單。</div>
+    </div>
+
+    <div class="row">
+      <button class="btn ghost" id="cancelBtn">取消</button>
+      <button class="btn primary" id="saveBtn">新增</button>
+    </div>
+  </div>
+</div>
+
+<!-- Supabase client (only used when keys are set below) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+/* ============================================================
+   設定區：把雲端變成兩支手機共用，只要填這兩行
+   到 Supabase 專案 → Settings → API 複製
+   ============================================================ */
+const SUPABASE_URL = "https://gqvcyvyrwfooerlxabjk.supabase.co";        // 例如 https://xxxx.supabase.co
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxdmN5dnlyd2Zvb2VybHhhYmprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc3NDk5NDMsImV4cCI6MjEwMzMyNTk0M30.UjmjL0zMXSVaUQpN60SOMFOumycKGfQCVp6aLPVpP8o";   // anon public key
+/* 兩者都留空 → 使用本機瀏覽器儲存（只有這台裝置看得到，適合先試玩） */
+
+const DAY = 86400000;
+const now = () => Date.now();
+
+/* ---------- 儲存後端（本機 / 雲端，同一組介面） ---------- */
+function makeLocalStore() {
+  const KEY = "familytasks_v1";
+  const read = () => JSON.parse(localStorage.getItem(KEY) || "[]");
+  const write = (a) => localStorage.setItem(KEY, JSON.stringify(a));
+  return {
+    kind: "local",
+    async list() { return read().sort((a,b)=> (a.created_at||0)-(b.created_at||0)); },
+    async add(t) { const a = read(); a.push(t); write(a); },
+    async update(id, fields) { const a = read().map(t => t.id===id ? {...t, ...fields} : t); write(a); },
+    async remove(id) { write(read().filter(t => t.id!==id)); },
+  };
+}
+function makeSupabaseStore() {
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const T = "tasks";
+  return {
+    kind: "cloud",
+    async list() {
+      const { data, error } = await sb.from(T).select("*").order("created_at", { ascending: true });
+      if (error) throw error; return data;
+    },
+    async add(t)          { const { error } = await sb.from(T).insert(t);        if (error) throw error; },
+    async update(id, f)   { const { error } = await sb.from(T).update(f).eq("id", id); if (error) throw error; },
+    async remove(id)      { const { error } = await sb.from(T).delete().eq("id", id);  if (error) throw error; },
+  };
+}
+const useCloud = SUPABASE_URL && SUPABASE_ANON_KEY;
+const store = useCloud ? makeSupabaseStore() : makeLocalStore();
+
+/* ---------- 「我是誰」 ---------- */
+function getUser() { return localStorage.getItem("ft_user") || ""; }
+function setUser(v) { localStorage.setItem("ft_user", v); }
+
+/* ---------- 週期判斷：到期就自動變待處理 ---------- */
+function isActive(t) {
+  if (!t.is_recurring) return t.status === "pending";
+  if (t.status === "pending") return true;
+  return t.next_due_at ? new Date(t.next_due_at).getTime() <= now() : false;
+}
+function dueText(t) {
+  if (!t.next_due_at) return "";
+  const diff = new Date(t.next_due_at).getTime() - now();
+  const d = Math.round(diff / DAY);
+  const date = new Date(t.next_due_at).toLocaleDateString("zh-TW", { month:"numeric", day:"numeric" });
+  if (diff <= 0) return { text: `已到期（${date}）`, dueNow: true };
+  if (d === 0) return { text: `今天到期`, dueNow: false };
+  return { text: `下次 ${date}（還有 ${d} 天）`, dueNow: false };
+}
+function periodLabel(days) {
+  const map = { 1:"每天", 7:"每週", 30:"每月", 90:"每 3 個月", 180:"每半年", 365:"每年" };
+  return map[days] || `每 ${days} 天`;
+}
+
+/* ---------- 動作 ---------- */
+async function complete(t) {
+  const user = getUser();
+  if (t.is_recurring) {
+    const n = now();
+    await store.update(t.id, {
+      status: "done", last_done_at: n, last_done_by: user,
+      next_due_at: n + t.period_days * DAY,
+    });
+  } else {
+    await store.update(t.id, { status: "done", last_done_at: now(), last_done_by: user });
+  }
+  render();
+}
+async function reopen(t)  { await store.update(t.id, { status: "pending" }); render(); }
+async function del(t)     { await store.remove(t.id); render(); }
+
+/* ---------- 畫面 ---------- */
+const $ = (s) => document.querySelector(s);
+const listEl = $("#list");
+
+function taskItem(t, { struck=false } = {}) {
+  const li = document.createElement("li");
+  li.className = "task" + (t.urgency === "urgent" && !struck ? " urgent" : "");
+
+  const check = document.createElement("button");
+  check.className = "check" + (struck ? " done" : "");
+  check.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
+  check.onclick = () => struck ? reopen(t) : complete(t);
+
+  const body = document.createElement("div");
+  body.className = "body";
+  const title = document.createElement("div");
+  title.className = "title" + (struck ? " struck" : "");
+  title.textContent = t.title;
+  body.appendChild(title);
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const bits = [];
+  if (t.urgency === "urgent" && !struck) bits.push('<span class="tag urg">🔴 Urgent</span>');
+  if (t.is_recurring) {
+    bits.push(`<span class="tag">🔁 ${periodLabel(t.period_days)}</span>`);
+    const dt = dueText(t);
+    if (dt && t.status === "done") bits.push(`<span class="tag ${dt.dueNow?'due-now':''}">${dt.text}</span>`);
+  }
+  if (struck && t.last_done_by) bits.push(`<span class="tag">✓ ${t.last_done_by}</span>`);
+  meta.innerHTML = bits.join("");
+  if (bits.length) body.appendChild(meta);
+
+  li.appendChild(check);
+  li.appendChild(body);
+
+  const delBtn = document.createElement("button");
+  delBtn.className = "del";
+  delBtn.textContent = "🗑";
+  delBtn.title = "刪除";
+  delBtn.onclick = (e) => { e.stopPropagation(); if (confirm(`刪除「${t.title}」？`)) del(t); };
+  // only show delete on the "done" list & scheduled recurring to reduce accidental taps
+  if (struck) li.appendChild(delBtn);
+
+  return li;
+}
+
+function sectionTitle(label, count) {
+  const h = document.createElement("div");
+  h.className = "section-title";
+  h.innerHTML = `${label} <span class="count">${count}</span>`;
+  return h;
+}
+
+async function render() {
+  $("#whoBtn").textContent = getUser() || "設定名字";
+  $("#backend").innerHTML = useCloud
+    ? '<span class="dot cloud"></span>雲端同步中（兩支手機共用）'
+    : '<span class="dot local"></span>本機模式（只有這台裝置看得到 — 填入 Supabase 金鑰即可上雲）';
+
+  let tasks;
+  try { tasks = await store.list(); }
+  catch (e) { listEl.innerHTML = `<div class="empty">連線失敗：${e.message}</div>`; return; }
+
+  const active = tasks.filter(isActive);
+  const urgent = active.filter(t => t.urgency === "urgent");
+  const normal = active.filter(t => t.urgency !== "urgent");
+  const scheduled = tasks.filter(t => t.is_recurring && !isActive(t));      // 週期，等下次
+  const doneOnce  = tasks.filter(t => !t.is_recurring && t.status === "done");
+
+  listEl.innerHTML = "";
+
+  if (!tasks.length) {
+    listEl.innerHTML = '<div class="empty">還沒有待辦。點右下角 ＋ 新增第一件事 🙂</div>';
+    return;
+  }
+
+  if (urgent.length) {
+    listEl.appendChild(sectionTitle("🔴 Urgent", urgent.length));
+    const ul = document.createElement("ul");
+    urgent.forEach(t => ul.appendChild(taskItem(t)));
+    listEl.appendChild(ul);
+  }
+  {
+    listEl.appendChild(sectionTitle("⚪ 一般待處理", normal.length));
+    const ul = document.createElement("ul");
+    if (normal.length) normal.forEach(t => ul.appendChild(taskItem(t)));
+    else ul.innerHTML = '<div class="empty" style="padding:18px">目前沒有一般待辦 👍</div>';
+    listEl.appendChild(ul);
+  }
+  if (scheduled.length) {
+    const det = document.createElement("details");
+    det.className = "done-group";
+    det.innerHTML = `<summary>${sectionTitleHTML("🔁 週期任務（已完成，等下次）", scheduled.length)}</summary>`;
+    const ul = document.createElement("ul");
+    scheduled.sort((a,b)=>(a.next_due_at||0)-(b.next_due_at||0));
+    scheduled.forEach(t => ul.appendChild(taskItem(t, { struck: true })));
+    det.appendChild(ul);
+    listEl.appendChild(det);
+  }
+  if (doneOnce.length) {
+    const det = document.createElement("details");
+    det.className = "done-group";
+    det.innerHTML = `<summary>${sectionTitleHTML("✓ 已完成", doneOnce.length)}</summary>`;
+    const ul = document.createElement("ul");
+    doneOnce.sort((a,b)=>(b.last_done_at||0)-(a.last_done_at||0));
+    doneOnce.forEach(t => ul.appendChild(taskItem(t, { struck: true })));
+    det.appendChild(ul);
+    listEl.appendChild(det);
+  }
+}
+function sectionTitleHTML(label, count) {
+  return `<span class="section-title" style="margin-left:0">${label} <span class="count">${count}</span></span>`;
+}
+
+/* ---------- 新增待辦 表單 ---------- */
+const backdrop = $("#backdrop");
+let form = { urgency: "normal", recurring: 0, period: 90 };
+
+function openSheet() {
+  $("#f_title").value = "";
+  form = { urgency: "normal", recurring: 0, period: 90 };
+  syncFormChips();
+  backdrop.classList.add("open");
+  setTimeout(() => $("#f_title").focus(), 50);
+}
+function closeSheet() { backdrop.classList.remove("open"); }
+
+function syncFormChips() {
+  document.querySelectorAll("#f_urgency .chip").forEach(c =>
+    c.classList.toggle("on", c.dataset.u === form.urgency));
+  document.querySelectorAll("#f_recurring .chip").forEach(c =>
+    c.classList.toggle("on", +c.dataset.r === form.recurring));
+  $("#periodWrap").classList.toggle("hidden", form.recurring !== 1);
+  document.querySelectorAll("#f_period .chip").forEach(c =>
+    c.classList.toggle("on", +c.dataset.p === form.period));
+}
+
+$("#f_urgency").onclick = (e) => { const c=e.target.closest(".chip"); if(!c)return; form.urgency=c.dataset.u; syncFormChips(); };
+$("#f_recurring").onclick = (e) => { const c=e.target.closest(".chip"); if(!c)return; form.recurring=+c.dataset.r; syncFormChips(); };
+$("#f_period").onclick = (e) => { const c=e.target.closest(".chip"); if(!c)return; form.period=+c.dataset.p; $("#f_period_custom").value=""; syncFormChips(); };
+$("#f_period_custom").oninput = (e) => { const v=parseInt(e.target.value,10); if(v>0){ form.period=v; document.querySelectorAll("#f_period .chip").forEach(c=>c.classList.remove("on")); } };
+
+$("#fab").onclick = openSheet;
+$("#cancelBtn").onclick = closeSheet;
+backdrop.onclick = (e) => { if (e.target === backdrop) closeSheet(); };
+
+$("#saveBtn").onclick = async () => {
+  const title = $("#f_title").value.trim();
+  if (!title) { $("#f_title").focus(); return; }
+  const t = {
+    id: (crypto.randomUUID ? crypto.randomUUID() : String(now()) + Math.random()),
+    title,
+    urgency: form.urgency,
+    is_recurring: form.recurring === 1,
+    period_days: form.recurring === 1 ? form.period : null,
+    status: "pending",
+    last_done_at: null, last_done_by: null, next_due_at: null,
+    created_at: now(),
+  };
+  try { await store.add(t); } catch (e) { alert("新增失敗：" + e.message); return; }
+  closeSheet();
+  render();
+};
+
+$("#whoBtn").onclick = () => {
+  const v = prompt("你是誰？（做完事情會記下是誰完成的）", getUser());
+  if (v !== null) { setUser(v.trim()); render(); }
+};
+
+/* 每分鐘重新判斷一次到期，讓週期任務自動浮回待處理 */
+setInterval(render, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
+
+render();
+</script>
+</body>
+</html>
