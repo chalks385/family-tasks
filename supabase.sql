@@ -30,8 +30,8 @@ create policy "family members only"
   on public.tasks
   for all
   to authenticated
-  using      ( (auth.jwt() ->> 'email') in ('chalks385@gmail.com', '換成老婆的email@example.com') )
-  with check ( (auth.jwt() ->> 'email') in ('chalks385@gmail.com', '換成老婆的email@example.com') );
+  using      ( (auth.jwt() ->> 'email') in ('chalks385@gmail.com', 'qq2989@hotmail.com') )
+  with check ( (auth.jwt() ->> 'email') in ('chalks385@gmail.com', 'qq2989@hotmail.com') );
 
 -- 開啟即時同步（一支手機改動，另一支自動看到）
 -- Supabase 通常預設已開；若沒有，執行下一行：
