@@ -70,6 +70,38 @@ Secrets 在 **Project Settings → Edge Functions → Secrets** 新增（同上�
 
 ---
 
+## 讓不會用的人也看得到教學（歡迎訊息 + 圖文選單）
+
+都在 **LINE Official Account Manager**（<https://manager.line.biz/>）設定。
+
+### 歡迎訊息（新朋友一加就看到）
+**主頁 → 加入好友的歡迎訊息**，貼上：
+```
+歡迎使用家庭待辦 🏠
+直接打字就能新增待辦，例如：
+・晾衣服
+・!晾衣服（急事）
+・每3個月 換濾芯（週期）
+做完了就打「完成 晾衣服」。
+輸入「說明」看完整用法、「清單」看目前待辦。
+```
+
+### 圖文選單（畫面下方常駐按鈕）
+**主頁 → 圖文選單 → 建立**：
+1. 版型選 **一列三格**（2500 × 843）
+2. 背景圖上傳 [`assets/line-richmenu.png`](assets/line-richmenu.png)
+3. 三格動作分別設成：
+
+| 格子 | 動作類型 | 內容 |
+|------|----------|------|
+| 左「看清單」 | 傳送文字 | `清單` |
+| 中「使用說明」 | 傳送文字 | `說明` |
+| 右「開啟 App」 | 連結（URI） | `https://chalks385.github.io/family-tasks/` |
+
+4. 設為使用中 → 存檔。點按鈕就會觸發對應動作。
+
+---
+
 ## C. 把 webhook 接回 LINE
 1. LINE console → **Messaging API** 分頁 → **Webhook URL** 填：
    `https://gqvcyvyrwfooerlxabjk.supabase.co/functions/v1/line-webhook` → **Update**
