@@ -17,7 +17,7 @@ const ALLOWED = (Deno.env.get("ALLOWED_USER_IDS") ?? "")
 // AI 意圖解析（三層備援）：Gemini（免費額度）→ Claude Haiku → 關鍵字比對。
 // 每一層拿不到金鑰或失敗，就自動往下一層。
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.6-flash";
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const AI_MODEL = Deno.env.get("AI_MODEL") ?? "claude-haiku-4-5";
 

@@ -69,8 +69,9 @@ Secrets 在 **Project Settings → Edge Functions → Secrets** 新增（同上�
    supabase secrets set GEMINI_API_KEY=你的Gemini_key
    supabase functions deploy line-webhook --no-verify-jwt
    ```
-   - 預設模型 `gemini-2.5-flash`（免費額度，家用綽綽有餘）。
-   - 想換模型可加 `GEMINI_MODEL`，例如 `supabase secrets set GEMINI_MODEL=gemini-2.0-flash`。
+   - 預設模型 `gemini-3.6-flash`（免費額度，家用綽綽有餘）。
+   - Google 之後若再改模型名稱，用 `GEMINI_MODEL` 覆蓋即可，例如
+     `supabase secrets set GEMINI_MODEL=gemini-3.6-flash`（不用改程式）。
 
 #### 選項 B：Claude Haiku（備援，或不想用 Gemini 時）
 1. 到 <https://console.anthropic.com/> 拿一把 API key（`sk-ant-...`）
