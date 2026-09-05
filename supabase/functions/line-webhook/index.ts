@@ -14,7 +14,10 @@ const ACCESS_TOKEN = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN") ?? "";
 const ALLOWED = (Deno.env.get("ALLOWED_USER_IDS") ?? "")
   .split(",").map((s) => s.trim()).filter(Boolean);
 
-// AI 意圖解析（可選）：設了 ANTHROPIC_API_KEY 就用 Claude 理解訊息；沒設則退回關鍵字比對。
+// AI 意圖解析（三層備援）：Gemini（免費額度）→ Claude Haiku → 關鍵字比對。
+// 每一層拿不到金鑰或失敗，就自動往下一層。
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const AI_MODEL = Deno.env.get("AI_MODEL") ?? "claude-haiku-4-5";
 
@@ -209,7 +212,71 @@ const INTENT_TOOL = {
   },
 };
 
-async function aiIntent(text: string): Promise<Intent | null> {
+// 把模型回傳的物件正規化成 Intent（Gemini / Claude 共用）
+function normalizeIntent(a: any): Intent | null {
+  if (!a || typeof a.intent !== "string") return null;
+  switch (a.intent) {
+    case "help": return { kind: "help" };
+    case "list": return { kind: "list" };
+    case "chitchat":
+      return { kind: "chitchat", reply: a.reply || "嗨！要新增待辦的話，直接打事情名稱就行～輸入「說明」看用法。" };
+    case "complete":
+      return a.query ? { kind: "complete", query: String(a.query) } : null;
+    case "create":
+      if (!a.title) return null;
+      return {
+        kind: "create",
+        title: String(a.title),
+        urgency: a.urgency === "urgent" ? "urgent" : "normal",
+        period_days: (typeof a.period_days === "number" && a.period_days > 0) ? a.period_days : null,
+      };
+    default: return null;
+  }
+}
+
+// 第一層：Gemini（免費額度）
+const GEMINI_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    intent: { type: "STRING", enum: ["create", "complete", "list", "help", "chitchat"] },
+    title: { type: "STRING" },
+    urgency: { type: "STRING", enum: ["urgent", "normal"] },
+    period_days: { type: "INTEGER" },
+    query: { type: "STRING" },
+    reply: { type: "STRING" },
+  },
+  required: ["intent"],
+};
+
+async function geminiIntent(text: string): Promise<Intent | null> {
+  if (!GEMINI_API_KEY) return null;
+  try {
+    const url =
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM }] },
+        contents: [{ role: "user", parts: [{ text }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: GEMINI_SCHEMA,
+          temperature: 0,
+          maxOutputTokens: 300,
+        },
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!raw) return null;
+    return normalizeIntent(JSON.parse(raw));
+  } catch (_) { return null; }
+}
+
+// 第二層：Claude Haiku（備援）
+async function claudeIntent(text: string): Promise<Intent | null> {
   if (!ANTHROPIC_API_KEY) return null;
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -231,25 +298,7 @@ async function aiIntent(text: string): Promise<Intent | null> {
     if (!res.ok) return null;
     const data = await res.json();
     const block = (data.content ?? []).find((b: any) => b.type === "tool_use");
-    const a = block?.input;
-    if (!a) return null;
-    switch (a.intent) {
-      case "help": return { kind: "help" };
-      case "list": return { kind: "list" };
-      case "chitchat":
-        return { kind: "chitchat", reply: a.reply || "嗨！要新增待辦的話，直接打事情名稱就行～輸入「說明」看用法。" };
-      case "complete":
-        return a.query ? { kind: "complete", query: String(a.query) } : null;
-      case "create":
-        if (!a.title) return null;
-        return {
-          kind: "create",
-          title: String(a.title),
-          urgency: a.urgency === "urgent" ? "urgent" : "normal",
-          period_days: (typeof a.period_days === "number" && a.period_days > 0) ? a.period_days : null,
-        };
-      default: return null;
-    }
+    return normalizeIntent(block?.input);
   } catch (_) { return null; }
 }
 
@@ -275,7 +324,9 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    const intent = (await aiIntent(ev.message.text)) ?? keywordIntent(ev.message.text);
+    const intent = (await geminiIntent(ev.message.text))    // 第一層：Gemini（免費）
+      ?? (await claudeIntent(ev.message.text))              // 第二層：Claude Haiku
+      ?? keywordIntent(ev.message.text);                    // 第三層：關鍵字比對
 
     if (intent.kind === "help") { await reply(ev.replyToken, HELP + setupHint); continue; }
     if (intent.kind === "list") { await reply(ev.replyToken, (await listText()) + setupHint); continue; }

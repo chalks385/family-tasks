@@ -56,17 +56,29 @@ Supabase 專案 → **Edge Functions** → **Create a function** 命名 `line-we
 Secrets 在 **Project Settings → Edge Functions → Secrets** 新增（同上三個）。
 
 ### 🧠 讓 bot 更聰明（可選，強烈建議）
-不設也能用（會退回關鍵字比對）；但設了之後，bot 會用 Claude 理解白話：
+不設也能用（會退回關鍵字比對）；但設了之後，bot 會用 AI 理解白話：
 `你好` 不會被當成家事、`記得每三個月換濾芯` 會自動變成週期任務。
 
-1. 到 <https://console.anthropic.com/> 拿一把 API key（`sk-ant-...`）
+**三層備援，哪一層拿不到就自動往下一層：**
+`Gemini（免費額度）` → `Claude Haiku` → `關鍵字比對`
+
+#### 選項 A：Gemini（免費，推薦）
+1. 到 <https://aistudio.google.com/apikey> 免費申請一把 API key（AI…）
 2. 設 secret 後重新部署：
    ```bash
-   supabase secrets set ANTHROPIC_API_KEY=sk-ant-你的key
+   supabase secrets set GEMINI_API_KEY=你的Gemini_key
    supabase functions deploy line-webhook --no-verify-jwt
    ```
-   - 預設用便宜又快的 **Haiku**（家用一個月通常幾分錢）。
+   - 預設模型 `gemini-2.5-flash`（免費額度，家用綽綽有餘）。
+   - 想換模型可加 `GEMINI_MODEL`，例如 `supabase secrets set GEMINI_MODEL=gemini-2.0-flash`。
+
+#### 選項 B：Claude Haiku（備援，或不想用 Gemini 時）
+1. 到 <https://console.anthropic.com/> 拿一把 API key（`sk-ant-...`）
+2. `supabase secrets set ANTHROPIC_API_KEY=sk-ant-你的key` → 重新部署
+   - 按 token 計費，家用一個月通常幾塊台幣。
    - 想更聰明可加 `AI_MODEL`，例如 `supabase secrets set AI_MODEL=claude-opus-5`。
+
+> 兩個都設 → 平時走 Gemini（免費），Gemini 若暫時失敗就自動改用 Haiku，最穩。
 
 ---
 
@@ -138,7 +150,7 @@ Secrets 在 **Project Settings → Edge Functions → Secrets** 新增（同上�
 | `清單` | 看目前待辦 |
 | `說明` | 顯示用法 |
 
-- 設了 `ANTHROPIC_API_KEY` 後，也能用**白話**：`記得每三個月換濾芯`、`幫我把倒垃圾打勾`、`還有什麼要做`；打招呼／閒聊（`你好`）不會被當成家事。
+- 設了 AI 金鑰（Gemini 或 Claude）後，也能用**白話**：`記得每三個月換濾芯`、`幫我把倒垃圾打勾`、`還有什麼要做`；打招呼／閒聊（`你好`）不會被當成家事。
 - 建立 / 完成的任務都會**立刻**反映在網頁 App。
 - `完成 X` 的 X 用**任務名稱的一部分**即可（例如 `完成 垃圾`）；若同時符合多筆，bot 會請你打完整一點。
 - 只能完成「目前待辦」中的任務；週期任務若還沒到下次，不在待辦內、不會被重複完成。
