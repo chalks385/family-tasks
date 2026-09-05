@@ -19,6 +19,15 @@
    - **Auto-reply messages** → Disabled
    - **Greeting messages** → 可關
 
+> ⚠️ **關掉罐頭訊息的真正開關在另一個後台**：如果加了好友還是會收到
+> 「感謝您的訊息！本帳號無法個別回覆…」，那是官方帳號的「自動回應訊息」。
+> 到 **LINE Official Account Manager**（<https://manager.line.biz/>）→ 選帳號 →
+> **設定 → 回應設定**：
+> - **自動回應訊息** → 停用（Off）
+> - **Webhook** → 啟用（On）
+> - 有 **回應模式** 的話選 **Bot**
+> 存檔後只會剩下我們 bot 自己的回覆。
+
 ---
 
 ## B. 部署 webhook 到 Supabase
