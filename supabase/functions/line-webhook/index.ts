@@ -196,7 +196,7 @@ async function listText(): Promise<string> {
 type Intent =
   | { kind: "help" } | { kind: "list" }
   | { kind: "chitchat"; reply: string }
-  | { kind: "complete"; query: string }
+  | { kind: "complete"; titles: string[] }
   | { kind: "create"; title: string; urgency: string; period_days: number | null };
 
 // 關鍵字比對 → Intent（沒有 API key、或 AI 失敗時的備援）
@@ -205,22 +205,22 @@ function keywordIntent(text: string): Intent {
   if ("cmd" in p) {
     if (p.cmd === "help") return { kind: "help" };
     if (p.cmd === "list") return { kind: "list" };
-    return { kind: "complete", query: p.query };
+    return { kind: "complete", titles: [p.query] };
   }
   if (!p.title) return { kind: "help" };
   return { kind: "create", title: p.title, urgency: p.urgency, period_days: p.period_days };
 }
 
-const SYSTEM = `你是「家庭待辦」LINE 助理的訊息解析器。針對使用者的每一則訊息，判斷意圖並呼叫 record_intent 回報。
+const SYSTEM = `你是「家庭待辦」LINE 助理的訊息解析器。使用者訊息前面會附上「目前待辦清單」。判斷意圖並呼叫 record_intent 回報。
 
 意圖：
 - create：想新增一件要做的事（家事、代辦、提醒）。title 放乾淨的事情名稱（去掉「急」「每天」等修飾詞）；語氣緊急（急、趕快、馬上、快、!）→ urgency=urgent，否則 normal；週期性 → period_days（每天=1、每週=7、每月=30、每3個月=90、每半年=180、每年=365、每N天=N），一次性則省略。
-- complete：想把某件事標記完成（完成、做完、搞定、弄好了、打勾）。事情名稱放 query。
+- complete：想把待辦標記完成。從「目前待辦清單」挑出要完成的項目，把它們的**完整名稱**放進 complete_titles 陣列（可多個）。範例：「除了洗碗以外全部完成」→ 清單中除了「洗碗」的所有名稱；「把緊急的都完成」→ 清單裡標(緊急)的那些；「倒垃圾跟晾衣服都做完了」→ ["倒垃圾","晾衣服"]；「完成晾衣服」→ ["晾衣服"]。只放清單裡真的存在的名稱；清單是空的就別放。
 - list：想看目前有哪些待辦（清單、還有什麼要做）。
 - help：問怎麼用、有哪些指令。
-- chitchat：打招呼、閒聊、道謝、與待辦無關。用繁體中文在 reply 回一句簡短友善的話，並溫和提示可直接打事情來新增。不要把閒聊當任務。
+- chitchat：打招呼、閒聊、道謝、與待辦無關。用繁體中文在 reply 回一句簡短友善的話。不要把閒聊當任務。
 
-規則：只有明確是「要做的事」才用 create；像「你好」「謝謝」「在嗎」用 chitchat；不確定時傾向 chitchat，不要亂建任務。全部用繁體中文。`;
+規則：只有明確是「要做的事」才用 create；像「你好」「謝謝」「在嗎」用 chitchat；complete 只能挑清單裡已存在的項目；不確定時傾向 chitchat。全部用繁體中文。`;
 
 const INTENT_TOOL = {
   name: "record_intent",
@@ -232,7 +232,10 @@ const INTENT_TOOL = {
       title: { type: "string", description: "create：任務名稱（去掉急/週期等修飾詞）" },
       urgency: { type: "string", enum: ["urgent", "normal"], description: "create：是否緊急" },
       period_days: { type: "integer", description: "create：週期天數；一次性省略或 0" },
-      query: { type: "string", description: "complete：要完成的任務名稱關鍵字" },
+      complete_titles: {
+        type: "array", items: { type: "string" },
+        description: "complete：要完成的任務完整名稱（從目前待辦清單挑，可多個）",
+      },
       reply: { type: "string", description: "chitchat：用繁體中文回一句友善的話" },
     },
     required: ["intent"],
@@ -247,8 +250,11 @@ function normalizeIntent(a: any): Intent | null {
     case "list": return { kind: "list" };
     case "chitchat":
       return { kind: "chitchat", reply: a.reply || "嗨！要新增待辦的話，直接打事情名稱就行～輸入「說明」看用法。" };
-    case "complete":
-      return a.query ? { kind: "complete", query: String(a.query) } : null;
+    case "complete": {
+      const raw = Array.isArray(a.complete_titles) ? a.complete_titles : (a.query ? [a.query] : []);
+      const titles = raw.map((s: any) => String(s).trim()).filter(Boolean);
+      return titles.length ? { kind: "complete", titles } : null;
+    }
     case "create":
       if (!a.title) return null;
       return {
@@ -269,7 +275,7 @@ const GEMINI_SCHEMA = {
     title: { type: "STRING" },
     urgency: { type: "STRING", enum: ["urgent", "normal"] },
     period_days: { type: "INTEGER" },
-    query: { type: "STRING" },
+    complete_titles: { type: "ARRAY", items: { type: "STRING" } },
     reply: { type: "STRING" },
   },
   required: ["intent"],
@@ -346,6 +352,38 @@ function aiStatusLine(): string {
   return `🤖 目前 AI：${chain[0]}` + (backups.length ? `\n（備援：${backups.join(" → ")}）` : "");
 }
 
+// 完成單一任務（週期任務會重算下次到期），回傳 patch
+async function applyComplete(t: any, who: string) {
+  const nowMs = Date.now();
+  const patch: any = t.is_recurring
+    ? { status: "done", last_done_at: new Date(nowMs).toISOString(), last_done_by: who,
+        next_due_at: new Date(nowMs + t.period_days * DAY).toISOString() }
+    : { status: "done", last_done_at: new Date(nowMs).toISOString(), last_done_by: who };
+  await supabase.from("tasks").update(patch).eq("id", t.id);
+  return patch;
+}
+
+// 「待確認」狀態（多件完成時，先問再做）——存在 line_pending 表，10 分鐘內有效
+async function setPending(userId: string, ids: string[]) {
+  try {
+    await supabase.from("line_pending")
+      .upsert({ user_id: userId, task_ids: ids, created_at: new Date().toISOString() });
+  } catch (_) { /* 表不存在等 → 忽略 */ }
+}
+async function getPending(userId: string): Promise<string[] | null> {
+  try {
+    const { data } = await supabase.from("line_pending").select("*").eq("user_id", userId).maybeSingle();
+    if (!data) return null;
+    if (Date.now() - new Date(data.created_at).getTime() > 10 * 60 * 1000) { await clearPending(userId); return null; }
+    return Array.isArray(data.task_ids) ? data.task_ids : null;
+  } catch (_) { return null; }
+}
+async function clearPending(userId: string) {
+  try { await supabase.from("line_pending").delete().eq("user_id", userId); } catch (_) { /* 忽略 */ }
+}
+const isConfirm = (t: string) => ["確定", "確認", "好", "好的", "ok", "OK", "yes", "y", "是", "對", "沒錯"].includes(t);
+const isCancel = (t: string) => ["取消", "不要", "算了", "不用", "no", "n", "先不要"].includes(t);
+
 /* ---------- 進入點 ---------- */
 Deno.serve(async (req) => {
   const rawBody = await req.text();
@@ -368,13 +406,42 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // 依序嘗試三層：Gemini（免費）→ Claude Haiku → 關鍵字比對
+    const text = ev.message.text.trim();
+
+    // 先處理「待確認」：若有先前待完成清單，這則是確定/取消就直接處理
+    const pendingIds = await getPending(userId);
+    if (pendingIds) {
+      if (isConfirm(text)) {
+        const who = await senderName(ev.source);
+        const { data: rows } = await supabase.from("tasks").select("*").in("id", pendingIds);
+        const done = rows ?? [];
+        for (const t of done) await applyComplete(t, who);
+        await clearPending(userId);
+        const list = done.map((t) => `・${t.title}`).join("\n");
+        await reply(ev.replyToken, `✔️ 已完成 ${done.length} 件（${who}）：\n${list}` + setupHint);
+        continue;
+      }
+      if (isCancel(text)) { await clearPending(userId); await reply(ev.replyToken, "已取消 👌" + setupHint); continue; }
+      await clearPending(userId);  // 傳了別的 → 視為放棄先前確認
+    }
+
+    // 讀出目前待辦，連同訊息交給 AI（讓它能處理「除了X以外全部完成」這類）
+    const { data: allTasks, error: listErr } = await supabase.from("tasks").select("*");
+    if (listErr) { await reply(ev.replyToken, "讀取失敗：" + listErr.message + setupHint); continue; }
+    const active = (allTasks ?? []).filter(isActiveTask);
+    const listContext = active.length
+      ? "目前待辦清單：\n" + active.map((t, i) =>
+          `${i + 1}. ${t.title}${t.urgency === "urgent" ? "（緊急）" : ""}${t.is_recurring ? "（週期）" : ""}`).join("\n")
+      : "目前沒有待辦。";
+    const contextText = `${listContext}\n\n使用者訊息：${text}`;
+
+    // 三層備援：Gemini（免費）→ Claude Haiku → 關鍵字比對
     let intent: Intent;
-    const g = await geminiIntent(ev.message.text);
+    const g = await geminiIntent(contextText);
     if (g) intent = g;
     else {
-      const c = await claudeIntent(ev.message.text);
-      intent = c ?? keywordIntent(ev.message.text);
+      const c = await claudeIntent(contextText);
+      intent = c ?? keywordIntent(text);
     }
 
     if (intent.kind === "help") { await reply(ev.replyToken, HELP + "\n\n" + aiStatusLine() + setupHint); continue; }
@@ -382,31 +449,29 @@ Deno.serve(async (req) => {
     if (intent.kind === "chitchat") { await reply(ev.replyToken, intent.reply + INTRO + setupHint); continue; }
 
     if (intent.kind === "complete") {
-      const { data, error } = await supabase.from("tasks").select("*");
-      if (error) { await reply(ev.replyToken, "讀取失敗：" + error.message + setupHint); continue; }
-      const active = (data ?? []).filter(isActiveTask);
-      const q = intent.query;
-      let hits = active.filter((t) => t.title === q);                          // 完全相同優先
-      if (!hits.length) hits = active.filter((t) => t.title.includes(q) || q.includes(t.title));
-      if (!hits.length) {
-        await reply(ev.replyToken, `找不到待辦：「${q}」\n輸入「清單」看目前有哪些。` + setupHint);
+      // 依 AI 給的名稱，從目前待辦挑出對應任務（精確優先，其次包含）
+      const chosen: any[] = [];
+      for (const q of intent.titles) {
+        let hit = active.find((t) => t.title === q);
+        if (!hit) hit = active.find((t) => t.title.includes(q) || q.includes(t.title));
+        if (hit && !chosen.some((c) => c.id === hit.id)) chosen.push(hit);
+      }
+      if (!chosen.length) {
+        await reply(ev.replyToken, "找不到符合的待辦。輸入「清單」看目前有哪些。" + setupHint);
         continue;
       }
-      if (hits.length > 1) {
-        await reply(ev.replyToken, "有多筆符合，請打完整一點：\n" + hits.map((t) => `・${t.title}`).join("\n") + setupHint);
+      if (chosen.length === 1) {
+        const who = await senderName(ev.source);
+        const patch = await applyComplete(chosen[0], who);
+        const t = chosen[0];
+        const rec = t.is_recurring ? `\n🔁 下次：${fmtDate(patch.next_due_at)}（${periodLabel(t.period_days)}）` : "";
+        await reply(ev.replyToken, `✔️ 已完成：${t.title}（${who}）${rec}` + setupHint);
         continue;
       }
-      const t = hits[0];
-      const who = await senderName(ev.source);
-      const nowMs = Date.now();
-      const patch: any = t.is_recurring
-        ? { status:"done", last_done_at:new Date(nowMs).toISOString(), last_done_by:who,
-            next_due_at:new Date(nowMs + t.period_days * DAY).toISOString() }
-        : { status:"done", last_done_at:new Date(nowMs).toISOString(), last_done_by:who };
-      const upd = await supabase.from("tasks").update(patch).eq("id", t.id);
-      if (upd.error) { await reply(ev.replyToken, "標記失敗：" + upd.error.message + setupHint); continue; }
-      const rec = t.is_recurring ? `\n🔁 下次：${fmtDate(patch.next_due_at)}（${periodLabel(t.period_days)}）` : "";
-      await reply(ev.replyToken, `✔️ 已完成：${t.title}（${who}）${rec}` + setupHint);
+      // 多件 → 先確認再執行
+      await setPending(userId, chosen.map((t) => t.id));
+      const listStr = chosen.map((t) => `・${t.title}`).join("\n");
+      await reply(ev.replyToken, `要完成這 ${chosen.length} 件嗎？\n${listStr}\n\n回「確定」就完成，「取消」放棄。` + setupHint);
       continue;
     }
 

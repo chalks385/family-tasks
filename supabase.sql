@@ -36,3 +36,15 @@ create policy "family members only"
 -- 開啟即時同步（一支手機改動，另一支自動看到）
 -- Supabase 通常預設已開；若沒有，執行下一行：
 -- alter publication supabase_realtime add table public.tasks;
+
+
+-- ============================================================
+-- LINE bot：「多件完成」的待確認狀態（只有 Edge Function 用 service_role 存取）
+-- ============================================================
+create table if not exists public.line_pending (
+  user_id    text primary key,
+  task_ids   jsonb not null,
+  created_at timestamptz not null default now()
+);
+-- 開 RLS 但不加 policy → anon/authenticated 一律拒絕；Edge Function 的 service_role 會繞過 RLS。
+alter table public.line_pending enable row level security;

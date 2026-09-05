@@ -148,6 +148,7 @@ Secrets 在 **Project Settings → Edge Functions → Secrets** 新增（同上�
 | `每週` / `每月` / `每3個月` / `每半年` / `每年` / `每5天 …` | 各種週期 |
 | `!每天 收衣服` | 緊急 + 每日重複 |
 | `完成 晾衣服`（或 `做完 晾衣服`） | 打勾完成（週期任務會自動算下次到期、記錄是誰做的） |
+| `除了洗碗以外全部完成`、`把緊急的都完成`、`倒垃圾跟晾衣服都做完了` | 批次／條件完成（**需 AI 金鑰**）。多件時會先列出來問「確定/取消」 |
 | `清單` | 看目前待辦 |
 | `說明` | 顯示用法 |
 
@@ -157,6 +158,9 @@ Secrets 在 **Project Settings → Edge Functions → Secrets** 新增（同上�
 - 只能完成「目前待辦」中的任務；週期任務若還沒到下次，不在待辦內、不會被重複完成。
 
 > 改了 `index.ts` 後要重新部署才會生效：`supabase functions deploy line-webhook --no-verify-jwt`
+
+> 🆕 **批次完成需要一張小表**：到 Supabase **SQL Editor** 重跑一次 [`supabase.sql`](supabase.sql)
+> （新增了 `line_pending` 表，存「多件完成」的待確認狀態；`create ... if not exists` 可安全重跑）。
 
 ---
 
