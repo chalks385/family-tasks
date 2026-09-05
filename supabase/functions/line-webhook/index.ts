@@ -337,7 +337,7 @@ Deno.serve(async (req) => {
     // 白名單（尚未設定時 → 開放並回傳 userId 方便你設定）
     const setupHint = ALLOWED.length ? "" : `\n\n🔧（設定用）你的 userId：\n${userId}`;
     if (ALLOWED.length && !ALLOWED.includes(userId)) {
-      await reply(ev.replyToken, "抱歉，你沒有使用權限 🙈");
+      await reply(ev.replyToken, `抱歉，你還沒有使用權限 🙈\n請把下面這串 userId 給管理員加入白名單：\n${userId}`);
       continue;
     }
 

@@ -157,3 +157,19 @@ Secrets 在 **Project Settings → Edge Functions → Secrets** 新增（同上�
 - 只能完成「目前待辦」中的任務；週期任務若還沒到下次，不在待辦內、不會被重複完成。
 
 > 改了 `index.ts` 後要重新部署才會生效：`supabase functions deploy line-webhook --no-verify-jwt`
+
+---
+
+## 日後要再加人（例如另一半、家人）
+
+**LINE bot：**
+1. 對方用手機 LINE **加 bot 好友**（Messaging API 分頁的 QR code，或把 bot 連結傳給對方）
+2. 對方傳任一則訊息 → bot 會回覆「你還沒有使用權限」並**附上他的 userId（U 開頭）**
+3. 把新的 userId 加進白名單、重設 secret 並重新部署：
+   ```bash
+   supabase secrets set ALLOWED_USER_IDS=U你的id,U對方的id
+   supabase functions deploy line-webhook --no-verify-jwt
+   ```
+   （多人就用逗號一路接下去）
+
+**網頁 App：** 把對方的 email 加進 [`supabase.sql`](supabase.sql) 的名單、到 Supabase SQL Editor 重跑一次即可；之後對方打開網址、用那個 email 收 magic link 登入就能用。
