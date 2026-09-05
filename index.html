@@ -290,6 +290,7 @@ function periodLabel(days) {
   const map = { 1:"每天", 7:"每週", 30:"每月", 90:"每 3 個月", 180:"每半年", 365:"每年" };
   return map[days] || `每 ${days} 天`;
 }
+function fmtDate(v) { return new Date(v).toLocaleDateString("zh-TW", { month:"numeric", day:"numeric" }); }
 
 /* ---------- 動作 ---------- */
 async function complete(t) {
@@ -336,8 +337,13 @@ function taskItem(t, { struck=false } = {}) {
     bits.push(`<span class="tag">🔁 ${periodLabel(t.period_days)}</span>`);
     const dt = dueText(t);
     if (dt && t.status === "done") bits.push(`<span class="tag ${dt.dueNow?'due-now':''}">${dt.text}</span>`);
+    if (t.last_done_at)
+      bits.push(`<span class="tag">↩︎ 上次 ${fmtDate(t.last_done_at)}${t.last_done_by ? ` · ${t.last_done_by}` : ""}</span>`);
+  } else if (struck && t.last_done_at) {
+    bits.push(`<span class="tag">✓ ${fmtDate(t.last_done_at)}${t.last_done_by ? ` · ${t.last_done_by}` : ""}</span>`);
+  } else if (struck && t.last_done_by) {
+    bits.push(`<span class="tag">✓ ${t.last_done_by}</span>`);
   }
-  if (struck && t.last_done_by) bits.push(`<span class="tag">✓ ${t.last_done_by}</span>`);
   meta.innerHTML = bits.join("");
   if (bits.length) body.appendChild(meta);
 
