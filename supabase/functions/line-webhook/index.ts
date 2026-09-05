@@ -55,7 +55,7 @@ function toNum(s: string): number | null {
 
 /* ---------- 解析訊息 ---------- */
 type Parsed =
-  | { cmd: "help" } | { cmd: "list" }
+  | { cmd: "help" } | { cmd: "list" } | { cmd: "done"; query: string }
   | { title: string; urgency: string; is_recurring: boolean; period_days: number | null };
 
 function stripUrgent(t: string): [string, boolean] {
@@ -87,6 +87,10 @@ function parse(textRaw: string): Parsed {
   if (["說明", "help", "?", "？", "指令", "幫助"].includes(low)) return { cmd: "help" };
   if (["清單", "列表", "list", "待辦"].includes(low)) return { cmd: "list" };
 
+  // 完成：完成/做完/搞定/done + 空格 + 任務名
+  const doneM = text.match(/^\s*(完成了?|做完了?|搞定了?|done)\s+(.+)/i);
+  if (doneM) return { cmd: "done", query: doneM[2].trim() };
+
   let t = text, urgency = "normal";
   let [t1, u1] = stripUrgent(t); t = t1;
   let [t2, period] = stripPeriod(t); t = t2;
@@ -101,6 +105,29 @@ function periodLabel(days: number | null): string {
   const map: Record<number, string> = { 1:"每天", 7:"每週", 30:"每月", 90:"每 3 個月", 180:"每半年", 365:"每年" };
   return (days && map[days]) || `每 ${days} 天`;
 }
+function fmtDate(v: string): string {
+  return new Date(v).toLocaleDateString("zh-TW", { month:"numeric", day:"numeric", timeZone:"Asia/Taipei" });
+}
+function isActiveTask(t: any): boolean {
+  if (!t.is_recurring) return t.status === "pending";
+  if (t.status === "pending") return true;
+  return t.next_due_at ? new Date(t.next_due_at).getTime() <= Date.now() : false;
+}
+// 完成時記錄「誰做的」→ 取 LINE 顯示名稱
+async function senderName(source: any): Promise<string> {
+  try {
+    const uid = source?.userId;
+    if (!uid) return "LINE";
+    const url = source.type === "group"
+      ? `https://api.line.me/v2/bot/group/${source.groupId}/member/${uid}`
+      : source.type === "room"
+        ? `https://api.line.me/v2/bot/room/${source.roomId}/member/${uid}`
+        : `https://api.line.me/v2/bot/profile/${uid}`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+    if (r.ok) { const j = await r.json(); return j.displayName || "LINE"; }
+  } catch (_) { /* ignore */ }
+  return "LINE";
+}
 
 const HELP = [
   "📋 家庭待辦 — 傳訊息就能建立",
@@ -111,6 +138,7 @@ const HELP = [
   "・每週 / 每月 / 每3個月 / 每半年 / 每年 / 每5天 …",
   "・!每天 收衣服 → 緊急 + 重複",
   "",
+  "・完成 晾衣服（或 做完 晾衣服）→ 打勾完成",
   "・清單 → 看目前待辦",
   "・說明 → 顯示這個",
 ].join("\n");
@@ -153,6 +181,34 @@ Deno.serve(async (req) => {
     const p = parse(ev.message.text);
     if ("cmd" in p && p.cmd === "help") { await reply(ev.replyToken, HELP + setupHint); continue; }
     if ("cmd" in p && p.cmd === "list") { await reply(ev.replyToken, (await listText()) + setupHint); continue; }
+    if ("cmd" in p && p.cmd === "done") {
+      const { data, error } = await supabase.from("tasks").select("*");
+      if (error) { await reply(ev.replyToken, "讀取失敗：" + error.message + setupHint); continue; }
+      const active = (data ?? []).filter(isActiveTask);
+      const q = p.query;
+      let hits = active.filter((t) => t.title === q);                          // 完全相同優先
+      if (!hits.length) hits = active.filter((t) => t.title.includes(q) || q.includes(t.title));
+      if (!hits.length) {
+        await reply(ev.replyToken, `找不到待辦：「${q}」\n輸入「清單」看目前有哪些。` + setupHint);
+        continue;
+      }
+      if (hits.length > 1) {
+        await reply(ev.replyToken, "有多筆符合，請打完整一點：\n" + hits.map((t) => `・${t.title}`).join("\n") + setupHint);
+        continue;
+      }
+      const t = hits[0];
+      const who = await senderName(ev.source);
+      const nowMs = Date.now();
+      const patch: any = t.is_recurring
+        ? { status:"done", last_done_at:new Date(nowMs).toISOString(), last_done_by:who,
+            next_due_at:new Date(nowMs + t.period_days * DAY).toISOString() }
+        : { status:"done", last_done_at:new Date(nowMs).toISOString(), last_done_by:who };
+      const upd = await supabase.from("tasks").update(patch).eq("id", t.id);
+      if (upd.error) { await reply(ev.replyToken, "標記失敗：" + upd.error.message + setupHint); continue; }
+      const rec = t.is_recurring ? `\n🔁 下次：${fmtDate(patch.next_due_at)}（${periodLabel(t.period_days)}）` : "";
+      await reply(ev.replyToken, `✔️ 已完成：${t.title}（${who}）${rec}` + setupHint);
+      continue;
+    }
     if (!("title" in p) || !p.title) {
       await reply(ev.replyToken, "要做什麼呢？直接打事情名稱即可。\n輸入「說明」看用法。" + setupHint);
       continue;
