@@ -14,6 +14,10 @@ const ACCESS_TOKEN = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN") ?? "";
 const ALLOWED = (Deno.env.get("ALLOWED_USER_IDS") ?? "")
   .split(",").map((s) => s.trim()).filter(Boolean);
 
+// AI 意圖解析（可選）：設了 ANTHROPIC_API_KEY 就用 Claude 理解訊息；沒設則退回關鍵字比對。
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+const AI_MODEL = Deno.env.get("AI_MODEL") ?? "claude-haiku-4-5";
+
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -141,6 +145,8 @@ const HELP = [
   "・完成 晾衣服（或 做完 晾衣服）→ 打勾完成",
   "・清單 → 看目前待辦",
   "・說明 → 顯示這個",
+  "",
+  "也可以直接用白話，例如「記得每三個月換濾芯」。",
 ].join("\n");
 
 async function listText(): Promise<string> {
@@ -154,6 +160,97 @@ async function listText(): Promise<string> {
   const urg = active.filter((t) => t.urgency === "urgent").map((t) => `🔴 ${t.title}`);
   const nor = active.filter((t) => t.urgency !== "urgent").map((t) => `・${t.title}`);
   return ["📋 目前待辦", ...urg, ...nor].join("\n");
+}
+
+/* ---------- 意圖：AI 理解（主）＋ 關鍵字比對（備援） ---------- */
+type Intent =
+  | { kind: "help" } | { kind: "list" }
+  | { kind: "chitchat"; reply: string }
+  | { kind: "complete"; query: string }
+  | { kind: "create"; title: string; urgency: string; period_days: number | null };
+
+// 關鍵字比對 → Intent（沒有 API key、或 AI 失敗時的備援）
+function keywordIntent(text: string): Intent {
+  const p = parse(text);
+  if ("cmd" in p) {
+    if (p.cmd === "help") return { kind: "help" };
+    if (p.cmd === "list") return { kind: "list" };
+    return { kind: "complete", query: p.query };
+  }
+  if (!p.title) return { kind: "help" };
+  return { kind: "create", title: p.title, urgency: p.urgency, period_days: p.period_days };
+}
+
+const SYSTEM = `你是「家庭待辦」LINE 助理的訊息解析器。針對使用者的每一則訊息，判斷意圖並呼叫 record_intent 回報。
+
+意圖：
+- create：想新增一件要做的事（家事、代辦、提醒）。title 放乾淨的事情名稱（去掉「急」「每天」等修飾詞）；語氣緊急（急、趕快、馬上、快、!）→ urgency=urgent，否則 normal；週期性 → period_days（每天=1、每週=7、每月=30、每3個月=90、每半年=180、每年=365、每N天=N），一次性則省略。
+- complete：想把某件事標記完成（完成、做完、搞定、弄好了、打勾）。事情名稱放 query。
+- list：想看目前有哪些待辦（清單、還有什麼要做）。
+- help：問怎麼用、有哪些指令。
+- chitchat：打招呼、閒聊、道謝、與待辦無關。用繁體中文在 reply 回一句簡短友善的話，並溫和提示可直接打事情來新增。不要把閒聊當任務。
+
+規則：只有明確是「要做的事」才用 create；像「你好」「謝謝」「在嗎」用 chitchat；不確定時傾向 chitchat，不要亂建任務。全部用繁體中文。`;
+
+const INTENT_TOOL = {
+  name: "record_intent",
+  description: "判斷家庭待辦 LINE 訊息的意圖並抽取欄位",
+  input_schema: {
+    type: "object",
+    properties: {
+      intent: { type: "string", enum: ["create", "complete", "list", "help", "chitchat"] },
+      title: { type: "string", description: "create：任務名稱（去掉急/週期等修飾詞）" },
+      urgency: { type: "string", enum: ["urgent", "normal"], description: "create：是否緊急" },
+      period_days: { type: "integer", description: "create：週期天數；一次性省略或 0" },
+      query: { type: "string", description: "complete：要完成的任務名稱關鍵字" },
+      reply: { type: "string", description: "chitchat：用繁體中文回一句友善的話" },
+    },
+    required: ["intent"],
+  },
+};
+
+async function aiIntent(text: string): Promise<Intent | null> {
+  if (!ANTHROPIC_API_KEY) return null;
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        max_tokens: 300,
+        system: SYSTEM,
+        tools: [INTENT_TOOL],
+        tool_choice: { type: "tool", name: "record_intent" },
+        messages: [{ role: "user", content: text }],
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const block = (data.content ?? []).find((b: any) => b.type === "tool_use");
+    const a = block?.input;
+    if (!a) return null;
+    switch (a.intent) {
+      case "help": return { kind: "help" };
+      case "list": return { kind: "list" };
+      case "chitchat":
+        return { kind: "chitchat", reply: a.reply || "嗨！要新增待辦的話，直接打事情名稱就行～輸入「說明」看用法。" };
+      case "complete":
+        return a.query ? { kind: "complete", query: String(a.query) } : null;
+      case "create":
+        if (!a.title) return null;
+        return {
+          kind: "create",
+          title: String(a.title),
+          urgency: a.urgency === "urgent" ? "urgent" : "normal",
+          period_days: (typeof a.period_days === "number" && a.period_days > 0) ? a.period_days : null,
+        };
+      default: return null;
+    }
+  } catch (_) { return null; }
 }
 
 /* ---------- 進入點 ---------- */
@@ -178,14 +275,17 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    const p = parse(ev.message.text);
-    if ("cmd" in p && p.cmd === "help") { await reply(ev.replyToken, HELP + setupHint); continue; }
-    if ("cmd" in p && p.cmd === "list") { await reply(ev.replyToken, (await listText()) + setupHint); continue; }
-    if ("cmd" in p && p.cmd === "done") {
+    const intent = (await aiIntent(ev.message.text)) ?? keywordIntent(ev.message.text);
+
+    if (intent.kind === "help") { await reply(ev.replyToken, HELP + setupHint); continue; }
+    if (intent.kind === "list") { await reply(ev.replyToken, (await listText()) + setupHint); continue; }
+    if (intent.kind === "chitchat") { await reply(ev.replyToken, intent.reply + setupHint); continue; }
+
+    if (intent.kind === "complete") {
       const { data, error } = await supabase.from("tasks").select("*");
       if (error) { await reply(ev.replyToken, "讀取失敗：" + error.message + setupHint); continue; }
       const active = (data ?? []).filter(isActiveTask);
-      const q = p.query;
+      const q = intent.query;
       let hits = active.filter((t) => t.title === q);                          // 完全相同優先
       if (!hits.length) hits = active.filter((t) => t.title.includes(q) || q.includes(t.title));
       if (!hits.length) {
@@ -209,22 +309,23 @@ Deno.serve(async (req) => {
       await reply(ev.replyToken, `✔️ 已完成：${t.title}（${who}）${rec}` + setupHint);
       continue;
     }
-    if (!("title" in p) || !p.title) {
+
+    // intent.kind === "create"
+    if (!intent.title) {
       await reply(ev.replyToken, "要做什麼呢？直接打事情名稱即可。\n輸入「說明」看用法。" + setupHint);
       continue;
     }
-
     const task = {
-      title: p.title, urgency: p.urgency,
-      is_recurring: p.is_recurring, period_days: p.period_days,
+      title: intent.title, urgency: intent.urgency,
+      is_recurring: intent.period_days != null, period_days: intent.period_days,
       status: "pending", created_at: new Date().toISOString(),
     };
     const { error } = await supabase.from("tasks").insert(task);
     if (error) { await reply(ev.replyToken, "新增失敗：" + error.message + setupHint); continue; }
 
-    const badge = p.urgency === "urgent" ? "🔴 " : "";
-    const rec = p.is_recurring ? `（🔁 ${periodLabel(p.period_days)}）` : "";
-    await reply(ev.replyToken, `✅ 已新增：${badge}${p.title}${rec}${setupHint}`);
+    const badge = intent.urgency === "urgent" ? "🔴 " : "";
+    const rec = intent.period_days != null ? `（🔁 ${periodLabel(intent.period_days)}）` : "";
+    await reply(ev.replyToken, `✅ 已新增：${badge}${intent.title}${rec}${setupHint}`);
   }
 
   return new Response("ok");

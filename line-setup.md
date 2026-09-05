@@ -55,6 +55,19 @@ Supabase 專案 → **Edge Functions** → **Create a function** 命名 `line-we
 把 [`supabase/functions/line-webhook/index.ts`](supabase/functions/line-webhook/index.ts) 內容貼上 → Deploy。
 Secrets 在 **Project Settings → Edge Functions → Secrets** 新增（同上三個）。
 
+### 🧠 讓 bot 更聰明（可選，強烈建議）
+不設也能用（會退回關鍵字比對）；但設了之後，bot 會用 Claude 理解白話：
+`你好` 不會被當成家事、`記得每三個月換濾芯` 會自動變成週期任務。
+
+1. 到 <https://console.anthropic.com/> 拿一把 API key（`sk-ant-...`）
+2. 設 secret 後重新部署：
+   ```bash
+   supabase secrets set ANTHROPIC_API_KEY=sk-ant-你的key
+   supabase functions deploy line-webhook --no-verify-jwt
+   ```
+   - 預設用便宜又快的 **Haiku**（家用一個月通常幾分錢）。
+   - 想更聰明可加 `AI_MODEL`，例如 `supabase secrets set AI_MODEL=claude-opus-5`。
+
 ---
 
 ## C. 把 webhook 接回 LINE
@@ -93,6 +106,7 @@ Secrets 在 **Project Settings → Edge Functions → Secrets** 新增（同上�
 | `清單` | 看目前待辦 |
 | `說明` | 顯示用法 |
 
+- 設了 `ANTHROPIC_API_KEY` 後，也能用**白話**：`記得每三個月換濾芯`、`幫我把倒垃圾打勾`、`還有什麼要做`；打招呼／閒聊（`你好`）不會被當成家事。
 - 建立 / 完成的任務都會**立刻**反映在網頁 App。
 - `完成 X` 的 X 用**任務名稱的一部分**即可（例如 `完成 垃圾`）；若同時符合多筆，bot 會請你打完整一點。
 - 只能完成「目前待辦」中的任務；週期任務若還沒到下次，不在待辦內、不會被重複完成。
