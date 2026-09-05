@@ -215,12 +215,18 @@ const SYSTEM = `你是「家庭待辦」LINE 助理的訊息解析器。使用�
 
 意圖：
 - create：想新增一件要做的事（家事、代辦、提醒）。title 放乾淨的事情名稱（去掉「急」「每天」等修飾詞）；語氣緊急（急、趕快、馬上、快、!）→ urgency=urgent，否則 normal；週期性 → period_days（每天=1、每週=7、每月=30、每3個月=90、每半年=180、每年=365、每N天=N），一次性則省略。
-- complete：想把待辦標記完成。從「目前待辦清單」挑出要完成的項目，把它們的**完整名稱**放進 complete_titles 陣列（可多個）。範例：「除了洗碗以外全部完成」→ 清單中除了「洗碗」的所有名稱；「把緊急的都完成」→ 清單裡標(緊急)的那些；「倒垃圾跟晾衣服都做完了」→ ["倒垃圾","晾衣服"]；「完成晾衣服」→ ["晾衣服"]。只放清單裡真的存在的名稱；清單是空的就別放。
+- complete：使用者在說某些事「做完/完成/好了/搞定/OK 了」。從「目前待辦清單」挑出對應項目，把它們的**完整名稱**（用清單上的原文，不要用使用者的簡稱）放進 complete_titles 陣列（可多個）。
+  使用者常用**簡稱或部分字**指稱清單項目，要對應回清單的完整名稱。例如清單有「包廁所跟廚房垃圾」「陽台紙箱都收掉拿下去丟」，使用者說「包垃圾」「陽台紙箱」就是指它們。
+  範例：「除了洗碗以外全部完成」→ 清單中除了「洗碗」的所有完整名稱；「把緊急的都完成」→ 清單裡標(緊急)的那些；「洗碗、包垃圾、陽台紙箱和晾衣服都完成了」→ 對應這四項的完整名稱；「完成晾衣服」→ ["晾衣服"]。
 - list：想看目前有哪些待辦（清單、還有什麼要做）。
 - help：問怎麼用、有哪些指令。
 - chitchat：打招呼、閒聊、道謝、與待辦無關。用繁體中文在 reply 回一句簡短友善的話。不要把閒聊當任務。
 
-規則：只有明確是「要做的事」才用 create；像「你好」「謝謝」「在嗎」用 chitchat；complete 只能挑清單裡已存在的項目；不確定時傾向 chitchat。全部用繁體中文。`;
+判斷要點：
+- 訊息在描述「某些事已經做完」（含 完成／做完／好了／搞定／弄好了／OK 了），且提到清單中的項目 → **一律是 complete，不是 create**。
+- 只有明確是「新的、還沒做的一件事」才用 create；像「你好」「謝謝」用 chitchat。
+- complete 只能挑清單裡已存在的項目；清單是空的就別當 complete。
+- 全部用繁體中文。`;
 
 const INTENT_TOOL = {
   name: "record_intent",
@@ -292,7 +298,7 @@ async function geminiIntent(text: string): Promise<Intent | null> {
       responseMimeType: "application/json",
       responseSchema: GEMINI_SCHEMA,
       temperature: 0,
-      maxOutputTokens: 300,
+      maxOutputTokens: 1024,
     },
   });
   // 最多試 2 次：碰到暫時性壅塞（429/500/503）就短暫等一下再重試
@@ -328,7 +334,7 @@ async function claudeIntent(text: string): Promise<Intent | null> {
       },
       body: JSON.stringify({
         model: AI_MODEL,
-        max_tokens: 300,
+        max_tokens: 1024,
         system: SYSTEM,
         tools: [INTENT_TOOL],
         tool_choice: { type: "tool", name: "record_intent" },
@@ -437,11 +443,13 @@ Deno.serve(async (req) => {
 
     // 三層備援：Gemini（免費）→ Claude Haiku → 關鍵字比對
     let intent: Intent;
+    let usedAI = true;
     const g = await geminiIntent(contextText);
     if (g) intent = g;
     else {
       const c = await claudeIntent(contextText);
-      intent = c ?? keywordIntent(text);
+      if (c) intent = c;
+      else { intent = keywordIntent(text); usedAI = false; }
     }
 
     if (intent.kind === "help") { await reply(ev.replyToken, HELP + "\n\n" + aiStatusLine() + setupHint); continue; }
@@ -478,6 +486,12 @@ Deno.serve(async (req) => {
     // intent.kind === "create"
     if (!intent.title) {
       await reply(ev.replyToken, "要做什麼呢？直接打事情名稱即可。\n輸入「說明」看用法。" + setupHint);
+      continue;
+    }
+    // AI 忙線退到關鍵字，且訊息像在說「做完了」→ 不要誤建成任務
+    if (!usedAI && /(完成|做完|好了|搞定|弄好|都\s*ok)/i.test(text)) {
+      await reply(ev.replyToken,
+        "AI 暫時忙線，這句我不太確定 🙏\n想標記完成的話，稍後再試一次，或用「完成 洗碗」逐一完成。" + setupHint);
       continue;
     }
     const task = {
