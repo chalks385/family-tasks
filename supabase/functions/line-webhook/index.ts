@@ -250,29 +250,36 @@ const GEMINI_SCHEMA = {
 
 async function geminiIntent(text: string): Promise<Intent | null> {
   if (!GEMINI_API_KEY) return null;
-  try {
-    const url =
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM }] },
-        contents: [{ role: "user", parts: [{ text }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: GEMINI_SCHEMA,
-          temperature: 0,
-          maxOutputTokens: 300,
-        },
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!raw) return null;
-    return normalizeIntent(JSON.parse(raw));
-  } catch (_) { return null; }
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+  const body = JSON.stringify({
+    systemInstruction: { parts: [{ text: SYSTEM }] },
+    contents: [{ role: "user", parts: [{ text }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: GEMINI_SCHEMA,
+      temperature: 0,
+      maxOutputTokens: 300,
+    },
+  });
+  // 最多試 2 次：碰到暫時性壅塞（429/500/503）就短暫等一下再重試
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        return raw ? normalizeIntent(JSON.parse(raw)) : null;
+      }
+      if (![429, 500, 503].includes(res.status)) return null;  // 非暫時性錯誤 → 直接放棄
+    } catch (_) { /* 網路錯誤 → 重試 */ }
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 800));
+  }
+  return null;
 }
 
 // 第二層：Claude Haiku（備援）
