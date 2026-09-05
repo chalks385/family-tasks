@@ -302,6 +302,16 @@ async function claudeIntent(text: string): Promise<Intent | null> {
   } catch (_) { return null; }
 }
 
+// 目前生效的 AI 層級（依設定的金鑰，主 → 備援）
+function aiStatusLine(): string {
+  const chain: string[] = [];
+  if (GEMINI_API_KEY) chain.push(`Gemini（${GEMINI_MODEL}）`);
+  if (ANTHROPIC_API_KEY) chain.push(`Claude（${AI_MODEL}）`);
+  chain.push("關鍵字比對");
+  const backups = chain.slice(1);
+  return `🤖 目前 AI：${chain[0]}` + (backups.length ? `\n（備援：${backups.join(" → ")}）` : "");
+}
+
 /* ---------- 進入點 ---------- */
 Deno.serve(async (req) => {
   const rawBody = await req.text();
@@ -328,7 +338,7 @@ Deno.serve(async (req) => {
       ?? (await claudeIntent(ev.message.text))              // 第二層：Claude Haiku
       ?? keywordIntent(ev.message.text);                    // 第三層：關鍵字比對
 
-    if (intent.kind === "help") { await reply(ev.replyToken, HELP + setupHint); continue; }
+    if (intent.kind === "help") { await reply(ev.replyToken, HELP + "\n\n" + aiStatusLine() + setupHint); continue; }
     if (intent.kind === "list") { await reply(ev.replyToken, (await listText()) + setupHint); continue; }
     if (intent.kind === "chitchat") { await reply(ev.replyToken, intent.reply + setupHint); continue; }
 
