@@ -334,13 +334,21 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    const intent = (await geminiIntent(ev.message.text))    // 第一層：Gemini（免費）
-      ?? (await claudeIntent(ev.message.text))              // 第二層：Claude Haiku
-      ?? keywordIntent(ev.message.text);                    // 第三層：關鍵字比對
+    // 依序嘗試三層，並記錄實際由哪一層判斷（診斷用）
+    let intent: Intent;
+    let source: string;
+    const g = await geminiIntent(ev.message.text);           // 第一層：Gemini（免費）
+    if (g) { intent = g; source = "Gemini"; }
+    else {
+      const c = await claudeIntent(ev.message.text);         // 第二層：Claude Haiku
+      if (c) { intent = c; source = "Claude"; }
+      else { intent = keywordIntent(ev.message.text); source = "關鍵字比對"; }  // 第三層
+    }
+    const tag = `\n（判斷：${source}）`;
 
     if (intent.kind === "help") { await reply(ev.replyToken, HELP + "\n\n" + aiStatusLine() + setupHint); continue; }
     if (intent.kind === "list") { await reply(ev.replyToken, (await listText()) + setupHint); continue; }
-    if (intent.kind === "chitchat") { await reply(ev.replyToken, intent.reply + setupHint); continue; }
+    if (intent.kind === "chitchat") { await reply(ev.replyToken, intent.reply + tag + setupHint); continue; }
 
     if (intent.kind === "complete") {
       const { data, error } = await supabase.from("tasks").select("*");
@@ -386,7 +394,7 @@ Deno.serve(async (req) => {
 
     const badge = intent.urgency === "urgent" ? "🔴 " : "";
     const rec = intent.period_days != null ? `（🔁 ${periodLabel(intent.period_days)}）` : "";
-    await reply(ev.replyToken, `✅ 已新增：${badge}${intent.title}${rec}${setupHint}`);
+    await reply(ev.replyToken, `✅ 已新增：${badge}${intent.title}${rec}${tag}${setupHint}`);
   }
 
   return new Response("ok");
