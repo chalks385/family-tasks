@@ -49,6 +49,22 @@ async function reply(replyToken: string, text: string) {
   });
 }
 
+/* ---------- LINE 主動推播（通知）---------- */
+async function pushMessage(to: string, text: string) {
+  try {
+    await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${ACCESS_TOKEN}` },
+      body: JSON.stringify({ to, messages: [{ type: "text", text }] }),
+    });
+  } catch (_) { /* 推播失敗不影響主流程 */ }
+}
+// 通知白名單裡「除了發起人以外」的所有人
+async function notifyOthers(exceptUserId: string, text: string) {
+  const targets = ALLOWED.filter((id) => id && id !== exceptUserId);
+  await Promise.all(targets.map((id) => pushMessage(id, text)));
+}
+
 /* ---------- 中文數字（常用）→ 數字 ---------- */
 const CN: Record<string, number> = { 一:1, 兩:2, 二:2, 三:3, 四:4, 五:5, 六:6, 七:7, 八:8, 九:9, 十:10 };
 function toNum(s: string): number | null {
@@ -150,6 +166,17 @@ const HELP = [
   "・說明 → 顯示這個",
   "",
   "也可以直接用白話，例如「記得每三個月換濾芯」。",
+].join("\n");
+
+// 閒聊時附上的簡短介紹（幫第一次用的人上手）
+const INTRO = [
+  "",
+  "———",
+  "我是「家庭待辦」小幫手 🏠 用法很簡單：",
+  "・記事情：直接打，例如「晾衣服」「每3個月 換濾芯」",
+  "・急事：前面加「!」→「!晾衣服」",
+  "・做完了：打「完成 晾衣服」",
+  "・看清單打「清單」、完整用法打「說明」",
 ].join("\n");
 
 async function listText(): Promise<string> {
@@ -352,7 +379,7 @@ Deno.serve(async (req) => {
 
     if (intent.kind === "help") { await reply(ev.replyToken, HELP + "\n\n" + aiStatusLine() + setupHint); continue; }
     if (intent.kind === "list") { await reply(ev.replyToken, (await listText()) + setupHint); continue; }
-    if (intent.kind === "chitchat") { await reply(ev.replyToken, intent.reply + setupHint); continue; }
+    if (intent.kind === "chitchat") { await reply(ev.replyToken, intent.reply + INTRO + setupHint); continue; }
 
     if (intent.kind === "complete") {
       const { data, error } = await supabase.from("tasks").select("*");
@@ -399,6 +426,9 @@ Deno.serve(async (req) => {
     const badge = intent.urgency === "urgent" ? "🔴 " : "";
     const rec = intent.period_days != null ? `（🔁 ${periodLabel(intent.period_days)}）` : "";
     await reply(ev.replyToken, `✅ 已新增：${badge}${intent.title}${rec}${setupHint}`);
+    // 通知其他有權限的人（發起人自己不通知）
+    const who = await senderName(ev.source);
+    await notifyOthers(userId, `📌 新家事：${badge}${intent.title}${rec}\n（${who} 新增）`);
   }
 
   return new Response("ok");
